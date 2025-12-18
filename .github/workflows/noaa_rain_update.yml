@@ -1,35 +1,19 @@
-
 name: Update Seattle Rain CSVs
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 9 * * 1"  # Mondays at 09:00 UTC
+    - cron: "0 9 * * 1"
 
 permissions:
-  contents: write   # allow commit/push from the workflow
+  contents: write
 
 jobs:
   fetch-noaa:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
-      # --- optional visibility while debugging (feel free to keep) ---
-      - name: Show repo tree (debug)
-        shell: bash
-        run: |
-          echo "PWD: $(pwd)"
-          echo "Top-level files:"
-          ls -la
-          echo "scripts/:"
-          ls -la scripts || true
-          echo "docs/:"
-          ls -la docs || true
-          echo "First lines of fetch script:"
-          head -n 30 scripts/fetch_noaa_precip.py || true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -37,48 +21,24 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Check NOAA token presence
-        shell: bash
-        env:
-          NOAA_CDO_TOKEN: ${{ secrets.NOAA_CDO_TOKEN }}
-        run: |
-          if [ -z "${NOAA_CDO_TOKEN}" ]; then
-            echo "NOAA_CDO_TOKEN is NOT set (create repo secret in Settings → Secrets and variables → Actions)."
-            exit 1
-          fi
-          echo "NOAA_CDO_TOKEN is present."
-
-      # --- Sanity test (proves token + params work) ---
-      - name: Sanity test the NOAA API (GSOM PRCP month)
-        shell: bash
-        env:
-          NOAA_CDO_TOKEN: ${{ secrets.NOAA_CDO_TOKEN }}
-        run: |
-          set -e
-          URL="https://www.ncei.noaa.gov/cdo-web/api/v2/data?datasetid=GSOM&datatypeid=PRCP&stationid=GHCND:USW00024233&startdate=2022-01-01&enddate=2022-12-31&units=standard&limit=5"
-          echo "Testing NOAA CDO with URL:"
-          echo "$URL"
-          curl -sS -f -H "token: ${NOAA_CDO_TOKEN}" "$URL" >/dev/null
-          echo "Sanity test returned HTTP 200."
-
-      # --- guarantee a non-blank end date for the script ---
       - name: Set end date env
-        shell: bash
         run: echo "NOAA_END_DATE=$(date -u +%F)" >> "$GITHUB_ENV"
 
       - name: Fetch NOAA CSVs
-        shell: bash
         env:
           NOAA_CDO_TOKEN: ${{ secrets.NOAA_CDO_TOKEN }}
           NOAA_START_DATE: "1991-01-01"
-          # NOAA_END_DATE comes from $GITHUB_ENV (Set end date env)
-        run: |
-          set -e
-          python scripts/fetch_noaa_precip.py
+          NOAA_END_DATE: ${{ env.NOAA_END_DATE }}
+        run: python scripts/fetch_noaa_precip.py
 
-      - name: Show generated files (debug)
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .
+          git commit -m "Update weather data: $(date -u +%F)" || echo "No changes to commit"
+          git push
