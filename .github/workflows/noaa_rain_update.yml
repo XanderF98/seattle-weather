@@ -6,12 +6,21 @@ on:
     - cron: "0 9 * * 1"  # Mondays at 09:00 UTC
   workflow_dispatch:
 
+permissions:
+  contents: write   # allow commit/push
+
 jobs:
   fetch-noaa:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+
+      - name: Show repo tree (debug)
+        run: |
+          ls -la
+          ls -la scripts || true
+          cat scripts/fetch_noaa_precip.py | head -n 20 || true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -23,10 +32,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Fetch NOAA CSVs
+      - name: Show NOAA token presence (debug)
         env:
           NOAA_CDO_TOKEN: ${{ secrets.NOAA_CDO_TOKEN }}
         run: |
+          if [ -z "${NOAA_CDO_TOKEN}" ]; then
+            echo "NOAA_CDO_TOKEN is NOT set (check repo secrets)."
+            exit 1
+          else
+            echo "NOAA_CDO_TOKEN is present."
+          fi
+
+      - name: Fetch NOAA CSVs
+        env:
+          NOAA_CDO_TOKEN: ${{ secrets.NOAA_CDO_TOKEN }}
+          NOAA_START_DATE: "1991-01-01"
+          NOAA_END_DATE: ""
+        run: |
+          set -e
           python scripts/fetch_noaa_precip.py
 
       - name: Commit changes
@@ -37,4 +60,6 @@ jobs:
           if ! git diff --cached --quiet; then
             git commit -m "Auto-update: NOAA precipitation CSVs"
             git push
+          else
+            echo "No CSV changes; skipping commit."
           fi
