@@ -7,17 +7,17 @@ on:
     - cron: "0 9 * * 1"  # Mondays at 09:00 UTC
 
 permissions:
-  contents: write   # allow commit/push from the workflow
+  contents: write   # allow commit/push
 
 jobs:
   fetch-noaa:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Show repo tree (debug)
+        shell: bash
         run: |
           echo "PWD: $(pwd)"
           echo "Top-level files:"
@@ -33,11 +33,13 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
+        shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install requests
 
       - name: Check NOAA token presence
+        shell: bash
         env:
           NOAA_CDO_TOKEN: ${{ secrets.NOAA_CDO_TOKEN }}
         run: |
@@ -47,10 +49,12 @@ jobs:
           fi
           echo "NOAA_CDO_TOKEN is present."
 
+      # Sanity test WITHOUT command substitution; just fail on non-200
       - name: Sanity test the NOAA API (GSOM PRCP month)
+        shell: bash
         env:
           NOAA_CDO_TOKEN: ${{ secrets.NOAA_CDO_TOKEN }}
         run: |
           set -e
-          CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+          curl -sS -f \
             -H "token: ${NOAA_CDO_TOKEN}" \
