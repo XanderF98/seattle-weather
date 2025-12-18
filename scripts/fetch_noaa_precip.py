@@ -1,54 +1,70 @@
-
 #!/usr/bin/env python3
-"""
-Auto-fetch NOAA monthly and annual precipitation for Sea-Tac via CDO API.
-Writes: seattle_rain_monthly.csv and seattle_rain_annual.csv
-
-Requirements:
-- Env var NOAA_CDO_TOKEN (your CDO API token)
-- Python 3.11+ and 'requests' library
-
-References:
-- CDO API v2 docs & required parameters:
-  https://www.ncei.noaa.gov/cdo-web/webservices/v2
-- Sea-Tac station (GHCND:USW00024233) in CDO:
-  https://www.ncdc.noaa.gov/cdo-web/datasets/GHCND/stations/GHCND:USW00024233/detail
-"""
 import os
 import sys
 import csv
 import datetime
 import requests
 
-# --- Configuration & env handling (blank-safe) ---
+# --- Configuration ---
 TOKEN = os.environ.get("NOAA_CDO_TOKEN")
 BASE = "https://www.ncei.noaa.gov/cdo-web/api/v2"
-STATION = "GHCND:USW00024233"  # Seattle Tacoma Airport (Sea-Tac)
+STATION = "GHCND:USW00024233"  # Sea-Tac Airport
 
-# If env var is missing or set to "", fall back to defaults
+# Fallbacks for manual runs or missing env vars
 START = os.environ.get("NOAA_START_DATE") or "1991-01-01"
 END   = os.environ.get("NOAA_END_DATE") or datetime.date.today().strftime("%Y-%m-%d")
 
-HEADERS = {"token": TOKEN}
+# Ensure the 'docs' directory exists so the dashboard can find files
+OUTPUT_DIR = "docs"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# --- Guards ---
+MONTHLY_FILE = os.path.join(OUTPUT_DIR, "seattle_monthly_rain.csv")
+ANNUAL_FILE  = os.path.join(OUTPUT_DIR, "seattle_annual_rain.csv")
+
 if not TOKEN:
-    print("ERROR: set NOAA_CDO_TOKEN env var (CDO API token required).", file=sys.stderr)
+    print("ERROR: NOAA_CDO_TOKEN is required.", file=sys.stderr)
     sys.exit(1)
 
-# --- Helper: robust request with better error visibility & pagination ---
-def cdo_data(params: dict) -> list:
-    """Fetch CDO /data with pagination and improved error messages."""
-    out = []
-    limit = 1000
-    offset = 1
+HEADERS = {"token": TOKEN}
 
-    while True:
-        p = dict(params)
-        p.update({"limit": limit, "offset": offset})
-        try:
-            r = requests.get(f"{BASE}/data", headers=HEADERS, params=p, timeout=60)
-        except requests.RequestException as e:
-            print(f"HTTP transport error: {e}", file=sys.stderr)
-            raise
+def fetch_cdo_data(datasetid, datatypeid):
+    """Fetch data from NOAA CDO API with basic pagination."""
+    results = []
+    params = {
+        "datasetid": datasetid,
+        "datatypeid": datatypeid,
+        "stationid": STATION,
+        "startdate": START,
+        "enddate": END,
+        "units": "standard",
+        "limit": 1000
+    }
+    
+    try:
+        response = requests.get(f"{BASE}/data", headers=HEADERS, params=params, timeout=60)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("results", [])
+    except Exception as e:
+        print(f"Error fetching {datatypeid}: {e}")
+        return []
 
+def save_csv(data, filename):
+    """Write the NOAA json results to a CSV file."""
+    if not data:
+        print(f"No data found for {filename}, skipping write.")
+        return
+    
+    keys = data[0].keys()
+    with open(filename, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=keys)
+        writer.writeheader()
+        writer.writerows(data)
+    print(f"Successfully saved: {filename}")
+
+def main():
+    print(f"Fetching data from {START} to {END}...")
+    
+    # GSOM = Global Summary of the Month (PRCP = Precipitation)
+    monthly_data = fetch_cdo_data("GSOM", "PRCP")
+    save_csv(monthly_data, MONTHLY_FILE)
