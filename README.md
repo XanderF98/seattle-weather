@@ -30,5 +30,5 @@ This kit auto-fetches **Seattle (Sea-Tac) precipitation** from NOAA's **Climate 
 
 ## Embed (Wix example)
 ```html
-<iframe src="https://xanderf98.github.io/seattle_rainseattle_rain_dashboard.html" width="100%" height="1200" frameborder="0"></iframe>
+<iframe src="https://xanderf98.github.io/seattle-weatherseattle_rain_dashboard.html" width="100%" height="1200" frameborder="0"></iframe>
 ```
