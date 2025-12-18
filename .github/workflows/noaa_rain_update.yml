@@ -3,7 +3,7 @@ name: Update Seattle Rain CSVs
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 9 * * 1"
+    - cron: "0 9 * * 1"  # Mondays at 09:00 UTC
 
 permissions:
   contents: write
@@ -11,6 +11,7 @@ permissions:
 jobs:
   fetch-noaa:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -39,6 +40,7 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add .
+          # This adds the CSVs generated in the root directory
+          git add seattle_monthly_rain.csv seattle_annual_rain.csv
           git commit -m "Update weather data: $(date -u +%F)" || echo "No changes to commit"
           git push
