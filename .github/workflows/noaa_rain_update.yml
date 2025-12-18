@@ -1,5 +1,5 @@
 
-name: Update Seattle Rain CSVs (debug)
+name: Update Seattle Rain CSVs
 
 on:
   workflow_dispatch:
@@ -7,11 +7,12 @@ on:
     - cron: "0 9 * * 1"  # Mondays at 09:00 UTC
 
 permissions:
-  contents: write   # allow commit/push
+  contents: write   # allow commit/push from the workflow
 
 jobs:
   fetch-noaa:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -41,7 +42,7 @@ jobs:
           NOAA_CDO_TOKEN: ${{ secrets.NOAA_CDO_TOKEN }}
         run: |
           if [ -z "${NOAA_CDO_TOKEN}" ]; then
-            echo "NOAA_CDO_TOKEN is NOT set (create repo secret)."
+            echo "NOAA_CDO_TOKEN is NOT set (create repo secret in Settings → Secrets and variables → Actions)."
             exit 1
           fi
           echo "NOAA_CDO_TOKEN is present."
@@ -51,29 +52,5 @@ jobs:
           NOAA_CDO_TOKEN: ${{ secrets.NOAA_CDO_TOKEN }}
         run: |
           set -e
-          # Expect 200 OK; if 401/403, your token or headers are wrong
-          curl -s -o /dev/null -w "HTTP:%{http_code}\n" \
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "token: ${NOAA_CDO_TOKEN}" \
-            "https://www.ncei.noaa.gov/cdo-web/api/v2/data?datasetid=GSOM&datatypeid=PRCP&stationid=GHCND:USW00024233&startdate=2022-01-01&enddate=2022-12-31&units=standard&limit=5"
-          echo "If the line above isn't HTTP:200, the token or params need attention."
-
-      - name: Fetch NOAA CSVs
-        env:
-          NOAA_CDO_TOKEN: ${{ secrets.NOAA_CDO_TOKEN }}
-          NOAA_START_DATE: "1991-01-01"
-          NOAA_END_DATE: ""
-        run: |
-          set -e
-          python scripts/fetch_noaa_precip.py
-
-      - name: Commit changes (if any)
-        run: |
-          git config user.name "gh-actions"
-          git config user.email "actions@github.com"
-          git add seattle_rain_monthly.csv seattle_rain_annual.csv
-          if ! git diff --cached --quiet; then
-            git commit -m "Auto-update: NOAA precipitation CSVs"
-            git push
-          else
-            echo "No CSV changes; skipping commit."
-          fi
