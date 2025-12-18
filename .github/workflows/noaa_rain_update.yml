@@ -12,6 +12,7 @@ permissions:
 jobs:
   fetch-noaa:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -49,12 +50,37 @@ jobs:
           fi
           echo "NOAA_CDO_TOKEN is present."
 
-      # Sanity test WITHOUT command substitution; just fail on non-200
+      # Sanity test: put URL in a var and quote it to avoid YAML/line wrapping issues
       - name: Sanity test the NOAA API (GSOM PRCP month)
         shell: bash
         env:
           NOAA_CDO_TOKEN: ${{ secrets.NOAA_CDO_TOKEN }}
         run: |
           set -e
-          curl -sS -f \
-            -H "token: ${NOAA_CDO_TOKEN}" \
+          URL="https://www.ncei.noaa.gov/cdo-web/api/v2/data?datasetid=GSOM&datatypeid=PRCP&stationid=GHCND:USW00024233&startdate=2022-01-01&enddate=2022-12-31&units=standard&limit=5"
+          echo "Testing NOAA CDO with URL:"
+          echo "$URL"
+          curl -sS -f -H "token: ${NOAA_CDO_TOKEN}" "$URL" >/dev/null
+          echo "Sanity test returned HTTP 200."
+
+      # Guaranteed non-blank end date for script
+      - name: Set end date env
+        shell: bash
+        run: echo "NOAA_END_DATE=$(date -u +%F)" >> "$GITHUB_ENV"
+
+      - name: Fetch NOAA CSVs
+        shell: bash
+        env:
+          NOAA_CDO_TOKEN: ${{ secrets.NOAA_CDO_TOKEN }}
+          NOAA_START_DATE: "1991-01-01"
+          # NOAA_END_DATE comes from $GITHUB_ENV
+        run: |
+          set -e
+          python scripts/fetch_noaa_precip.py
+
+      - name: Show generated files (debug)
+        shell: bash
+        run: |
+          echo "Workspace after fetch:"
+          ls -la
+
