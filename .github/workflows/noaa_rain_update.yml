@@ -25,6 +25,8 @@ jobs:
           ls -la
           echo "scripts/:"
           ls -la scripts || true
+          echo "docs/:"
+          ls -la docs || true
           echo "First lines of fetch script:"
           head -n 30 scripts/fetch_noaa_precip.py || true
 
@@ -50,7 +52,7 @@ jobs:
           fi
           echo "NOAA_CDO_TOKEN is present."
 
-      # Sanity test: put URL in a var and quote it to avoid YAML/line wrapping issues
+      # Sanity test: use a quoted URL var to avoid YAML line folding issues
       - name: Sanity test the NOAA API (GSOM PRCP month)
         shell: bash
         env:
@@ -63,7 +65,7 @@ jobs:
           curl -sS -f -H "token: ${NOAA_CDO_TOKEN}" "$URL" >/dev/null
           echo "Sanity test returned HTTP 200."
 
-      # Guaranteed non-blank end date for script
+      # Ensure end date is never blank for the script
       - name: Set end date env
         shell: bash
         run: echo "NOAA_END_DATE=$(date -u +%F)" >> "$GITHUB_ENV"
@@ -73,7 +75,7 @@ jobs:
         env:
           NOAA_CDO_TOKEN: ${{ secrets.NOAA_CDO_TOKEN }}
           NOAA_START_DATE: "1991-01-01"
-          # NOAA_END_DATE comes from $GITHUB_ENV
+          # NOAA_END_DATE comes from $GITHUB_ENV (Set end date env)
         run: |
           set -e
           python scripts/fetch_noaa_precip.py
@@ -84,3 +86,41 @@ jobs:
           echo "Workspace after fetch:"
           ls -la
 
+      # Move generated CSVs into /docs so Pages can serve them
+      - name: Move CSVs into docs for Pages
+        shell: bash
+        run: |
+          set -e
+          mkdir -p docs
+          if [ -f seattle_rain_monthly.csv ]; then mv -f seattle_rain_monthly.csv docs/; fi
+          if [ -f seattle_rain_annual.csv ]; then mv -f seattle_rain_annual.csv docs/; fi
+          echo "docs/ contents:"
+          ls -la docs
+
+      - name: Commit changes (if any)
+        shell: bash
+        run: |
+          set -e
+          git config user.name "gh-actions"
+          git config user.email "actions@github.com"
+
+          ADDED=0
+          if [ -f docs/seattle_rain_monthly.csv ]; then
+            git add docs/seattle_rain_monthly.csv
+            ADDED=1
+          fi
+          if [ -f docs/seattle_rain_annual.csv ]; then
+            git add docs/seattle_rain_annual.csv
+            ADDED=1
+          fi
+
+          if [ "$ADDED" -eq 1 ]; then
+            if ! git diff --cached --quiet; then
+              git commit -m "Auto-update: NOAA precipitation CSVs (docs)"
+              git push
+            else
+              echo "No changes to commit."
+            fi
+          else
+            echo "CSV files not found; nothing to commit."
+          fi
