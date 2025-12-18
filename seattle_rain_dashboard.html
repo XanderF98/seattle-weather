@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang='en'>
 <head>
@@ -8,44 +7,47 @@
   <script src='https://cdn.plot.ly/plotly-2.29.1.min.js'></script>
   <script src='https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js'></script>
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial; margin:0; padding:24px;}
-    h1{margin:0 0 6px 0; text-align:center}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial; margin:0; padding:24px; background-color: #f4f7f6;}
+    h1{margin:0 0 6px 0; text-align:center; color: #123C69;}
     p.sub{margin:0 0 16px 0; text-align:center; color:#666}
     .wrap{max-width:1100px; margin:0 auto}
-    .card{background:#fff; border:1px solid #e6e6e6; border-radius:10px; padding:16px; margin:12px 0}
+    .card{background:#fff; border:1px solid #e6e6e6; border-radius:10px; padding:16px; margin:12px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.05);}
     .row{display:flex; gap:16px; flex-wrap:wrap}
     .col{flex:1 1 520px}
-    .note{background:#f9fafb; border:1px dashed #dcdcdc; padding:12px; border-radius:8px; color:#555}
-    select{padding:6px 8px;}
+    .note{background:#fffbe6; border:1px dashed #ffe58f; padding:12px; border-radius:8px; color:#856404; font-size: 0.9em;}
+    select{padding:6px 12px; border-radius: 4px; border: 1px solid #ccc;}
   </style>
 </head>
 <body>
-  <h1>Seattle Rain Trends (Monthly + Annual)</h1>
-  <p class='sub'>Hover for tooltips • Use the controls to filter • Place <code>seattle_rain_monthly.csv</code> and <code>seattle_rain_annual.csv</code> alongside this file.</p>
+  <h1>Seattle Rain Trends (Sea-Tac)</h1>
+  <p class='sub'>Interactive visualization of NOAA precipitation data</p>
+  
   <div class='wrap'>
-    <div class='card note'>
-      <strong>How to use:</strong> Upload two CSVs named <code>seattle_rain_monthly.csv</code> and <code>seattle_rain_annual.csv</code> next to this HTML file (same folder). Once hosted (e.g., GitHub Pages), charts will render automatically.
+    <div id="error-box" class='card note' style="display:none; background:#fff1f0; border-color:#ffa39e; color:#cf1322;">
+        <strong>Error:</strong> Could not find CSV data. Ensure the GitHub Action has run successfully.
     </div>
 
     <div class='card'>
       <div style='display:flex; align-items:center; gap:12px; margin-bottom:8px;'>
-        <label for='yearSel'><strong>Select year:</strong></label>
+        <label for='yearSel'><strong>Select Year for Monthly View:</strong></label>
         <select id='yearSel'></select>
       </div>
-      <div id='monthlyChart' style='height:440px;'></div>
+      <div id='monthlyChart' style='height:400px;'></div>
     </div>
 
     <div class='row'>
       <div class='card col'>
-        <div id='annualTrend' style='height:440px;'></div>
+        <div id='annualTrend' style='height:400px;'></div>
       </div>
       <div class='card col'>
-        <div id='monthlyHeat' style='height:440px;'></div>
+        <div id='monthlyHeat' style='height:400px;'></div>
       </div>
     </div>
 
-    <div class='card note'>
-      <strong>Sources:</strong> NOAA/NCEI Climate Data Online (CDO) GSOM/GSOY precipitation. Station: Sea-Tac (GHCND:USW00024233).
+    <div class='card' style="font-size: 0.85em; color: #777;">
+      <strong>Data Source:</strong> NOAA Global Summary of the Month/Year (GSOM/GSOY). 
+      <strong>Station:</strong> GHCND:USW00024233. 
+      <em>Updated automatically via GitHub Actions.</em>
     </div>
   </div>
 
@@ -53,6 +55,19 @@
 const MONTHS_ORDER = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 let monthlyData = [];
 let annualData = [];
+
+// Helper to parse NOAA's "YYYY-MM-DD" or "YYYY-MM" into usable parts
+function processNoaaRow(row) {
+    if (!row.date) return null;
+    const dateParts = row.date.split('-');
+    const year = parseInt(dateParts[0]);
+    const monthIndex = parseInt(dateParts[1]) - 1;
+    return {
+        Year: year,
+        Month: MONTHS_ORDER[monthIndex],
+        Precip: parseFloat(row.value)
+    };
+}
 
 function loadCSV(path){
   return new Promise((resolve,reject)=>{
@@ -69,61 +84,27 @@ function loadCSV(path){
 
 function initSelectors(){
   const sel = document.getElementById('yearSel');
-  const years = Array.from(new Set(monthlyData.map(d=>d.Year))).sort((a,b)=>a-b);
+  const years = Array.from(new Set(monthlyData.map(d=>d.Year))).sort((a,b)=>b-a);
   sel.innerHTML = years.map(y=>`<option value='${y}'>${y}</option>`).join('');
   sel.onchange = renderMonthly;
-  if(years.length){ sel.value = years[years.length-1]; }
+  if(years.length){ sel.value = years[0]; }
 }
 
 function renderMonthly(){
   const year = parseInt(document.getElementById('yearSel').value,10);
   const rows = monthlyData.filter(d=>d.Year===year);
-  const monthMap = new Map(rows.map(r=>[String(r.Month).slice(0,3), r]));
+  const monthMap = new Map(rows.map(r=>[r.Month, r.Precip]));
+  
   const x = MONTHS_ORDER;
-  const y = x.map(m=> (monthMap.get(m) && monthMap.get(m).Precip_in) ? monthMap.get(m).Precip_in : null);
+  const y = x.map(m=> monthMap.has(m) ? monthMap.get(m) : 0);
 
-  const trace = { x, y, type:'bar', marker:{color:'#1B98E0'}, hovertemplate:'%{x}<br>Precip: %{y} in<extra></extra>' };
-  const layout = { title:`Monthly Precipitation — ${year}`, yaxis:{ title:'Inches' }, xaxis:{ tickangle:-45 }, margin:{l:60,r:20,t:60,b:80} };
-  Plotly.newPlot('monthlyChart', [trace], layout, {displayModeBar:true, responsive:true});
-}
-
-function renderAnnual(){
-  if(!annualData.length){
-    document.getElementById('annualTrend').innerHTML = '<div style="color:#666">Annual CSV not found or empty.</div>';
-    return;
-  }
-  const years = annualData.map(d=>d.Year);
-  const totals = annualData.map(d=>d.TotalPrecip_in);
-  const trace = { x: years, y: totals, mode:'lines+markers', name:'Annual precip', line:{color:'#123C69', width:3}, marker:{size:8}, hovertemplate:'%{x}<br>Total: %{y} in<extra></extra>' };
-  const layout = { title:'Annual Precipitation (Total inches)', xaxis:{ title:'Year' }, yaxis:{ title:'Inches' }, margin:{l:60,r:20,t:60,b:60} };
-  Plotly.newPlot('annualTrend', [trace], layout, {displayModeBar:true, responsive:true});
-}
-
-function renderHeat(){
-  if(!monthlyData.length){
-    document.getElementById('monthlyHeat').innerHTML = '<div style="color:#666">Monthly CSV not found or empty.</div>';
-    return;
-  }
-  const years = Array.from(new Set(monthlyData.map(d=>d.Year))).sort((a,b)=>a-b);
-  const matrix = years.map(y=>{
-    const rows = monthlyData.filter(d=>d.Year===y);
-    const map = new Map(rows.map(r=>[String(r.Month).slice(0,3), r.Precip_in]));
-    return MONTHS_ORDER.map(m=> map.get(m) ?? null);
-  });
-  const data = [{ z: matrix, x: MONTHS_ORDER, y: years, type:'heatmap', colorscale:'Blues', hovertemplate:'Year %{y}, %{x}<br>Precip: %{z} in<extra></extra>' }];
-  const layout = { title:'Monthly Precipitation Heatmap', xaxis:{ title:'Month' }, yaxis:{ title:'Year' }, margin:{l:60,r:20,t:60,b:60} };
-  Plotly.newPlot('monthlyHeat', data, layout, {displayModeBar:true, responsive:true});
-}
-
-async function boot(){
-  try{ monthlyData = await loadCSV('seattle_rain_monthly.csv'); }catch(e){ console.warn('Monthly CSV not found:', e); }
-  try{ annualData = await loadCSV('seattle_rain_annual.csv'); }catch(e){ console.warn('Annual CSV not found:', e); }
-  if(monthlyData.length){ initSelectors(); renderMonthly(); }
-  else{ document.getElementById('monthlyChart').innerHTML = '<div style="color:#666">Monthly CSV not found. Provide <code>seattle_rain_monthly.csv</code>.</div>'; }
-  renderAnnual();
-  renderHeat();
-}
-boot();
-</script>
-</body>
-</html>
+  const trace = { 
+      x, y, 
+      type:'bar', 
+      marker:{color:'#1B98E0'}, 
+      hovertemplate:'%{x}: %{y}"<extra></extra>' 
+  };
+  const layout = { 
+      title:`Monthly Rainfall in ${year}`, 
+      yaxis:{ title:'Inches' }, 
+      margin:{l:50,r:20,t
