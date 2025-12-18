@@ -40,7 +40,14 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          # This adds the CSVs generated in the root directory
-          git add seattle_monthly_rain.csv seattle_annual_rain.csv
+          
+          # This 'ls' helps us see exactly what was created in the logs
+          echo "Files in root after script run:"
+          ls -F
+          
+          # Add all changes (avoids 'pathspec' errors if a file is missing)
+          git add .
+          
+          # Commit only if there are changes; || true prevents failure if data hasn't changed
           git commit -m "Update weather data: $(date -u +%F)" || echo "No changes to commit"
           git push
