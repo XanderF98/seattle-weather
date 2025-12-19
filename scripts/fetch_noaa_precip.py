@@ -1,124 +1,44 @@
-<script>
-const MONTHS_ORDER = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-let monthlyData = [];
-let annualData = [];
+import os
+import requests
+import pandas as pd
+from datetime import datetime
 
-/** 1. SMART DATA PROCESSING (Handles different header names) **/
-function getVal(row, keys) {
-    const foundKey = Object.keys(row).find(k => keys.includes(k.toUpperCase()));
-    return foundKey ? row[foundKey] : null;
-}
+# Setup
+TOKEN = os.getenv('NOAA_CDO_TOKEN')
+STATION_ID = 'GHCND:USW00024233'
+BASE_URL = 'https://www.ncei.noaa.gov/cdo-web/api/v2/data'
+HEADERS = {'token': TOKEN}
 
-function processMonthlyRow(row) {
-    const dateVal = getVal(row, ['DATE', 'MONTH', 'TIME']);
-    const precipVal = getVal(row, ['PRCP', 'PRECIP', 'VALUE', 'PRECIPITATION']);
-    
-    if (!dateVal) return null;
-    
-    const dateParts = String(dateVal).split('-');
-    const year = parseInt(dateParts[0]);
-    const monthIndex = parseInt(dateParts[1]) - 1;
-    
-    return {
-        Year: year,
-        Month: MONTHS_ORDER[monthIndex],
-        Precip: parseFloat(precipVal) || 0
-    };
-}
+def fetch_data(dataset_id, start_date, end_date):
+    params = {
+        'datasetid': dataset_id,
+        'stationid': STATION_ID,
+        'startdate': start_date,
+        'enddate': end_date,
+        'limit': 1000,
+        'units': 'standard'
+    }
+    r = requests.get(BASE_URL, headers=HEADERS, params=params)
+    return r.json().get('results', []) if r.status_code == 200 else []
 
-function processAnnualRow(row) {
-    const dateVal = getVal(row, ['DATE', 'YEAR', 'TIME']);
-    const precipVal = getVal(row, ['PRCP', 'PRECIP', 'VALUE', 'PRECIPITATION']);
-    
-    if (!dateVal) return null;
-    return {
-        Year: parseInt(String(dateVal).split('-')[0]),
-        Precip: parseFloat(precipVal) || 0
-    };
-}
+def main():
+    # Use dates from environment or defaults
+    start = os.getenv('NOAA_START_DATE', '1991-01-01')
+    end = os.getenv('NOAA_END_DATE', datetime.now().strftime('%Y-%m-%d'))
 
-function loadCSV(path){
-  return new Promise((resolve,reject)=>{
-    Papa.parse(path, {
-      download: true,
-      header: true,
-      dynamicTyping: true,
-      skipEmptyLines: true,
-      complete: results => {
-          if (results.errors.length > 0) reject("Parse Error");
-          else resolve(results.data);
-      },
-      error: err => reject(err)
-    });
-  });
-}
+    # Fetch Monthly Data
+    m_data = fetch_data('GSOM', start, end)
+    if m_data:
+        df = pd.DataFrame(m_data)
+        df = df[df['datatype'] == 'PRCP']
+        df[['date', 'value']].to_csv('seattle_rain_monthly.csv', index=False, header=['DATE', 'PRCP'])
 
-/** 2. UI & CHARTS (Same as before) **/
-function initSelectors(){
-  const sel = document.getElementById('yearSel');
-  const years = Array.from(new Set(monthlyData.map(d=>d.Year))).sort((a,b)=>b-a);
-  sel.innerHTML = years.map(y=>`<option value='${y}'>${y}</option>`).join('');
-  sel.onchange = renderMonthly;
-  if(years.length){ sel.value = years[0]; }
-}
+    # Fetch Annual Data
+    a_data = fetch_data('GSOY', start, end)
+    if a_data:
+        df = pd.DataFrame(a_data)
+        df = df[df['datatype'] == 'PRCP']
+        df[['date', 'value']].to_csv('seattle_rain_annual.csv', index=False, header=['DATE', 'PRCP'])
 
-function renderMonthly(){
-  const year = parseInt(document.getElementById('yearSel').value,10);
-  const rows = monthlyData.filter(d=>d.Year===year);
-  const monthMap = new Map(rows.map(r=>[r.Month, r.Precip]));
-  const x = MONTHS_ORDER;
-  const y = x.map(m=> monthMap.has(m) ? monthMap.get(m) : 0);
-  const trace = { x, y, type:'bar', marker:{color:'#1B98E0'} };
-  Plotly.newPlot('monthlyChart', [trace], { title:`Monthly Rainfall in ${year}`, yaxis:{title:'Inches'} });
-}
-
-function renderAnnualTrend() {
-    const trace = {
-        x: annualData.map(d => d.Year),
-        y: annualData.map(d => d.Precip),
-        type: 'scatter', mode: 'lines+markers', line: {color: '#123C69'}
-    };
-    Plotly.newPlot('annualTrend', [trace], { title: 'Total Annual Precipitation', yaxis: {title: 'Inches'} });
-}
-
-function renderHeatmap() {
-    const years = Array.from(new Set(monthlyData.map(d => d.Year))).sort();
-    const zData = years.map(y => {
-        const yearRows = monthlyData.filter(d => d.Year === y);
-        const monthMap = new Map(yearRows.map(r => [r.Month, r.Precip]));
-        return MONTHS_ORDER.map(m => monthMap.get(m) || 0);
-    });
-    const data = [{ z: zData, x: MONTHS_ORDER, y: years, type: 'heatmap', colorscale: 'Blues' }];
-    Plotly.newPlot('monthlyHeat', data, { title: 'Rainfall Intensity (Heatmap)' });
-}
-
-/** 3. STARTUP ENGINE **/
-window.addEventListener('DOMContentLoaded', () => {
-    const errorBox = document.getElementById('error-box');
-    
-    Promise.all([
-        loadCSV('seattle_rain_monthly.csv'),
-        loadCSV('seattle_rain_annual.csv')
-    ])
-    .then(([monthlyRaw, annualRaw]) => {
-        monthlyData = monthlyRaw.map(processMonthlyRow).filter(d => d !== null);
-        annualData = annualRaw.map(processAnnualRow).filter(d => d !== null);
-        
-        if(monthlyData.length === 0 || annualData.length === 0) {
-            errorBox.innerHTML = "<strong>Error:</strong> Files loaded, but the data format is unexpected. Check your CSV column headers.";
-            errorBox.style.display = 'block';
-            return;
-        }
-
-        initSelectors();
-        renderMonthly();
-        renderAnnualTrend();
-        renderHeatmap();
-    })
-    .catch(err => {
-        console.error(err);
-        errorBox.innerHTML = `<strong>Error:</strong> Could not load CSV files. (Details: ${err.statusText || 'File not found or CORS error'})`;
-        errorBox.style.display = 'block';
-    });
-});
-</script>
+if __name__ == "__main__":
+    main()
