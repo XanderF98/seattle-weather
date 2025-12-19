@@ -7,7 +7,6 @@ import time
 # CONFIG
 TOKEN = os.environ.get("NOAA_CDO_TOKEN")
 STATION = "GHCND:USW00024233"
-# DASHBOARD FILENAMES
 MONTHLY_FILE = "seattle_rain_monthly.csv"
 ANNUAL_FILE  = "seattle_rain_annual.csv"
 
@@ -24,33 +23,38 @@ def fetch_and_save(dataset, filename, start_date):
         "units": "standard"
     }
     
-    # Simple retry logic for 503 errors
     for attempt in range(3):
         response = requests.get("https://www.ncei.noaa.gov/cdo-web/api/v2/data", headers=headers, params=params)
         if response.status_code == 200:
-            data = response.json().get("results", [])
-            if data:
+            results = response.json().get("results", [])
+            if results:
+                # CLEAN DATA FOR DASHBOARD
+                cleaned_data = []
+                for row in results:
+                    cleaned_data.append({
+                        "date": row["date"].split("T")[0], # Fixes the T00:00:00 issue
+                        "value": row["value"]
+                    })
+                
                 with open(filename, "w", newline="") as f:
-                    writer = csv.DictWriter(f, fieldnames=data[0].keys())
+                    writer = csv.DictWriter(f, fieldnames=["date", "value"])
                     writer.writeheader()
-                    writer.writerows(data)
-                print(f"SUCCESS: Saved {len(data)} rows to {filename}")
+                    writer.writerows(cleaned_data)
+                print(f"SUCCESS: Saved {len(cleaned_data)} cleaned rows to {filename}")
                 return
             else:
                 print(f"WARNING: No data for {dataset}")
                 return
         elif response.status_code == 503:
-            print(f"Server busy (503), retrying in 5s... (Attempt {attempt+1})")
             time.sleep(5)
         else:
-            print(f"ERROR: API returned {response.status_code}. {response.text}")
+            print(f"ERROR: {response.status_code}")
             return
 
 if __name__ == "__main__":
     if not TOKEN:
-        print("CRITICAL ERROR: NOAA_CDO_TOKEN not found!")
+        print("CRITICAL ERROR: TOKEN missing")
     else:
-        # GSOM has a 10-year limit per request
+        # Fetching last 9 years to stay under 10-year limit
         fetch_and_save("GSOM", MONTHLY_FILE, "2016-01-01")
-        # GSOY has a 10-year limit per request
         fetch_and_save("GSOY", ANNUAL_FILE, "2016-01-01")
