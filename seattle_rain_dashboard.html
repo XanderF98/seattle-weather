@@ -24,7 +24,7 @@
   
   <div class='wrap'>
     <div id="error-box" class='card note' style="display:none; background:#fff1f0; border-color:#ffa39e; color:#cf1322;">
-        <strong>Error:</strong> Could not find CSV data. Ensure the GitHub Action has run successfully and the CSV file is named <code>data.csv</code>.
+        <strong>Error:</strong> Could not find data files. Ensure <code>seattle_rain_annual.csv</code> and <code>seattle_rain_monthly.csv</code> are in the correct folder.
     </div>
 
     <div class='card'>
@@ -45,7 +45,7 @@
     </div>
 
     <div class='card' style="font-size: 0.85em; color: #777;">
-      <strong>Data Source:</strong> NOAA Global Summary of the Month/Year (GSOM/GSOY). 
+      <strong>Data Source:</strong> NOAA GSOM/GSOY. 
       <strong>Station:</strong> GHCND:USW00024233. 
       <em>Updated automatically via GitHub Actions.</em>
     </div>
@@ -54,20 +54,26 @@
 <script>
 const MONTHS_ORDER = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 let monthlyData = [];
+let annualData = [];
 
 /** 1. DATA PROCESSING **/
-function processNoaaRow(row) {
+function processMonthlyRow(row) {
     if (!row.DATE) return null;
     const dateParts = row.DATE.split('-');
     const year = parseInt(dateParts[0]);
     const monthIndex = parseInt(dateParts[1]) - 1;
-    // NOAA CSVs usually use 'PRCP' for precipitation
-    const precip = parseFloat(row.PRCP) || 0; 
-    
     return {
         Year: year,
         Month: MONTHS_ORDER[monthIndex],
-        Precip: precip
+        Precip: parseFloat(row.PRCP) || 0
+    };
+}
+
+function processAnnualRow(row) {
+    if (!row.DATE) return null;
+    return {
+        Year: parseInt(row.DATE.split('-')[0]),
+        Precip: parseFloat(row.PRCP) || 0
     };
 }
 
@@ -95,7 +101,6 @@ function initSelectors(){
 
 /** 3. CHART RENDERING **/
 
-// Bar Chart: Monthly Rainfall for a Specific Year
 function renderMonthly(){
   const year = parseInt(document.getElementById('yearSel').value,10);
   const rows = monthlyData.filter(d=>d.Year===year);
@@ -118,35 +123,29 @@ function renderMonthly(){
   Plotly.newPlot('monthlyChart', [trace], layout, {responsive: true});
 }
 
-// Line Chart: Annual Total Trends
 function renderAnnualTrend() {
-    const annualTotals = {};
-    monthlyData.forEach(d => {
-        annualTotals[d.Year] = (annualTotals[d.Year] || 0) + d.Precip;
-    });
-
-    const years = Object.keys(annualTotals).sort();
-    const totals = years.map(y => annualTotals[y]);
+    const years = annualData.map(d => d.Year);
+    const totals = annualData.map(d => d.Precip);
 
     const trace = {
         x: years,
         y: totals,
         type: 'scatter',
         mode: 'lines+markers',
-        line: {color: '#123C69', shape: 'spline'},
+        line: {color: '#123C69', width: 3},
+        marker: {size: 8},
         name: 'Annual Total'
     };
 
     const layout = {
         title: 'Total Annual Precipitation',
         yaxis: {title: 'Total Inches'},
-        xaxis: {title: 'Year'},
+        xaxis: {title: 'Year', tickformat: 'd'},
         margin: {l:50,r:20,t:40,b:40}
     };
     Plotly.newPlot('annualTrend', [trace], layout, {responsive: true});
 }
 
-// Heatmap: Months vs Years
 function renderHeatmap() {
     const years = Array.from(new Set(monthlyData.map(d => d.Year))).sort();
     const zData = years.map(y => {
@@ -161,36 +160,42 @@ function renderHeatmap() {
         y: years,
         type: 'heatmap',
         colorscale: 'Blues',
-        reversescale: false
+        colorbar: {title: 'Inches'}
     }];
 
     const layout = {
         title: 'Rainfall Intensity (Heatmap)',
-        margin: {l:60,r:20,t:40,b:40}
+        margin: {l:60,r:20,t:40,b:40},
+        xaxis: {title: 'Month'},
+        yaxis: {title: 'Year'}
     };
     Plotly.newPlot('monthlyHeat', data, layout, {responsive: true});
 }
 
 /** 4. STARTUP ENGINE **/
 window.addEventListener('DOMContentLoaded', () => {
-    // Assuming your GitHub action saves the file as 'data.csv'
-    loadCSV('data.csv')
-        .then(rawRows => {
-            monthlyData = rawRows.map(processNoaaRow).filter(d => d !== null);
-            
-            if(monthlyData.length === 0) {
-                throw new Error("CSV parsed but no valid data found.");
-            }
+    // Load both files at the same time
+    Promise.all([
+        loadCSV('seattle_rain_monthly.csv'),
+        loadCSV('seattle_rain_annual.csv')
+    ])
+    .then(([monthlyRaw, annualRaw]) => {
+        monthlyData = monthlyRaw.map(processMonthlyRow).filter(d => d !== null);
+        annualData = annualRaw.map(processAnnualRow).filter(d => d !== null);
+        
+        if(monthlyData.length === 0 || annualData.length === 0) {
+            throw new Error("One or more files loaded but were empty.");
+        }
 
-            initSelectors();
-            renderMonthly();
-            renderAnnualTrend();
-            renderHeatmap();
-        })
-        .catch(err => {
-            console.error("Data Load Error:", err);
-            document.getElementById('error-box').style.display = 'block';
-        });
+        initSelectors();
+        renderMonthly();
+        renderAnnualTrend();
+        renderHeatmap();
+    })
+    .catch(err => {
+        console.error("Data Load Error:", err);
+        document.getElementById('error-box').style.display = 'block';
+    });
 });
 </script>
 </body>
