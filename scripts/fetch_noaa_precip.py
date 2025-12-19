@@ -1,60 +1,124 @@
-import os
-import requests
-import csv
-import datetime
-import time
+<script>
+const MONTHS_ORDER = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+let monthlyData = [];
+let annualData = [];
 
-# CONFIG
-TOKEN = os.environ.get("NOAA_CDO_TOKEN")
-STATION = "GHCND:USW00024233"
-MONTHLY_FILE = "seattle_rain_monthly.csv"
-ANNUAL_FILE  = "seattle_rain_annual.csv"
+/** 1. SMART DATA PROCESSING (Handles different header names) **/
+function getVal(row, keys) {
+    const foundKey = Object.keys(row).find(k => keys.includes(k.toUpperCase()));
+    return foundKey ? row[foundKey] : null;
+}
 
-def fetch_and_save(dataset, filename, start_date):
-    print(f"--- Processing {dataset} ---")
-    headers = {"token": TOKEN}
-    params = {
-        "datasetid": dataset,
-        "datatypeid": "PRCP",
-        "stationid": STATION,
-        "startdate": start_date,
-        "enddate": datetime.date.today().strftime("%Y-%m-%d"),
-        "limit": 1000,
-        "units": "standard"
-    }
+function processMonthlyRow(row) {
+    const dateVal = getVal(row, ['DATE', 'MONTH', 'TIME']);
+    const precipVal = getVal(row, ['PRCP', 'PRECIP', 'VALUE', 'PRECIPITATION']);
     
-    for attempt in range(3):
-        response = requests.get("https://www.ncei.noaa.gov/cdo-web/api/v2/data", headers=headers, params=params)
-        if response.status_code == 200:
-            results = response.json().get("results", [])
-            if results:
-                # CLEAN DATA FOR DASHBOARD
-                cleaned_data = []
-                for row in results:
-                    cleaned_data.append({
-                        "date": row["date"].split("T")[0], # Fixes the T00:00:00 issue
-                        "value": row["value"]
-                    })
-                
-                with open(filename, "w", newline="") as f:
-                    writer = csv.DictWriter(f, fieldnames=["date", "value"])
-                    writer.writeheader()
-                    writer.writerows(cleaned_data)
-                print(f"SUCCESS: Saved {len(cleaned_data)} cleaned rows to {filename}")
-                return
-            else:
-                print(f"WARNING: No data for {dataset}")
-                return
-        elif response.status_code == 503:
-            time.sleep(5)
-        else:
-            print(f"ERROR: {response.status_code}")
-            return
+    if (!dateVal) return null;
+    
+    const dateParts = String(dateVal).split('-');
+    const year = parseInt(dateParts[0]);
+    const monthIndex = parseInt(dateParts[1]) - 1;
+    
+    return {
+        Year: year,
+        Month: MONTHS_ORDER[monthIndex],
+        Precip: parseFloat(precipVal) || 0
+    };
+}
 
-if __name__ == "__main__":
-    if not TOKEN:
-        print("CRITICAL ERROR: TOKEN missing")
-    else:
-        # Fetching last 9 years to stay under 10-year limit
-        fetch_and_save("GSOM", MONTHLY_FILE, "2016-01-01")
-        fetch_and_save("GSOY", ANNUAL_FILE, "2016-01-01")
+function processAnnualRow(row) {
+    const dateVal = getVal(row, ['DATE', 'YEAR', 'TIME']);
+    const precipVal = getVal(row, ['PRCP', 'PRECIP', 'VALUE', 'PRECIPITATION']);
+    
+    if (!dateVal) return null;
+    return {
+        Year: parseInt(String(dateVal).split('-')[0]),
+        Precip: parseFloat(precipVal) || 0
+    };
+}
+
+function loadCSV(path){
+  return new Promise((resolve,reject)=>{
+    Papa.parse(path, {
+      download: true,
+      header: true,
+      dynamicTyping: true,
+      skipEmptyLines: true,
+      complete: results => {
+          if (results.errors.length > 0) reject("Parse Error");
+          else resolve(results.data);
+      },
+      error: err => reject(err)
+    });
+  });
+}
+
+/** 2. UI & CHARTS (Same as before) **/
+function initSelectors(){
+  const sel = document.getElementById('yearSel');
+  const years = Array.from(new Set(monthlyData.map(d=>d.Year))).sort((a,b)=>b-a);
+  sel.innerHTML = years.map(y=>`<option value='${y}'>${y}</option>`).join('');
+  sel.onchange = renderMonthly;
+  if(years.length){ sel.value = years[0]; }
+}
+
+function renderMonthly(){
+  const year = parseInt(document.getElementById('yearSel').value,10);
+  const rows = monthlyData.filter(d=>d.Year===year);
+  const monthMap = new Map(rows.map(r=>[r.Month, r.Precip]));
+  const x = MONTHS_ORDER;
+  const y = x.map(m=> monthMap.has(m) ? monthMap.get(m) : 0);
+  const trace = { x, y, type:'bar', marker:{color:'#1B98E0'} };
+  Plotly.newPlot('monthlyChart', [trace], { title:`Monthly Rainfall in ${year}`, yaxis:{title:'Inches'} });
+}
+
+function renderAnnualTrend() {
+    const trace = {
+        x: annualData.map(d => d.Year),
+        y: annualData.map(d => d.Precip),
+        type: 'scatter', mode: 'lines+markers', line: {color: '#123C69'}
+    };
+    Plotly.newPlot('annualTrend', [trace], { title: 'Total Annual Precipitation', yaxis: {title: 'Inches'} });
+}
+
+function renderHeatmap() {
+    const years = Array.from(new Set(monthlyData.map(d => d.Year))).sort();
+    const zData = years.map(y => {
+        const yearRows = monthlyData.filter(d => d.Year === y);
+        const monthMap = new Map(yearRows.map(r => [r.Month, r.Precip]));
+        return MONTHS_ORDER.map(m => monthMap.get(m) || 0);
+    });
+    const data = [{ z: zData, x: MONTHS_ORDER, y: years, type: 'heatmap', colorscale: 'Blues' }];
+    Plotly.newPlot('monthlyHeat', data, { title: 'Rainfall Intensity (Heatmap)' });
+}
+
+/** 3. STARTUP ENGINE **/
+window.addEventListener('DOMContentLoaded', () => {
+    const errorBox = document.getElementById('error-box');
+    
+    Promise.all([
+        loadCSV('seattle_rain_monthly.csv'),
+        loadCSV('seattle_rain_annual.csv')
+    ])
+    .then(([monthlyRaw, annualRaw]) => {
+        monthlyData = monthlyRaw.map(processMonthlyRow).filter(d => d !== null);
+        annualData = annualRaw.map(processAnnualRow).filter(d => d !== null);
+        
+        if(monthlyData.length === 0 || annualData.length === 0) {
+            errorBox.innerHTML = "<strong>Error:</strong> Files loaded, but the data format is unexpected. Check your CSV column headers.";
+            errorBox.style.display = 'block';
+            return;
+        }
+
+        initSelectors();
+        renderMonthly();
+        renderAnnualTrend();
+        renderHeatmap();
+    })
+    .catch(err => {
+        console.error(err);
+        errorBox.innerHTML = `<strong>Error:</strong> Could not load CSV files. (Details: ${err.statusText || 'File not found or CORS error'})`;
+        errorBox.style.display = 'block';
+    });
+});
+</script>
