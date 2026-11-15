@@ -1,34 +1,59 @@
+# Seattle Rain Trends
 
-# Seattle Rain Trends — Ready-to-use Repo Kit
+An interactive dashboard of Seattle's rainfall, built on NOAA's official record for Seattle-Tacoma International Airport.
 
-This kit auto-fetches **Seattle (Sea-Tac) precipitation** from NOAA's **Climate Data Online (CDO)** API and renders an interactive dashboard.
+**Live dashboard:** https://xanderf98.github.io/seattle-weather/seattle_rain_dashboard.html
 
-## What’s included
-- `seattle_rain_dashboard.html` — Plotly dashboard (loads two CSVs)
-- `seattle_rain_annual_template.csv` / `seattle_rain_monthly_template.csv` — CSV formats
-- `scripts/fetch_noaa_precip.py` — Pulls monthly (GSOM) & annual (GSOY) precipitation for Sea-Tac (station `GHCND:USW00024233`)
-- `.github/workflows/noaa_rain_update.yml` — GitHub Actions to refresh CSVs on a schedule
+## What it shows
 
-## Setup
-1. **Create repo** and add these files to the root (preserve folder structure).
-2. **Set secret**: In GitHub → *Settings → Secrets and variables → Actions* → `NOAA_CDO_TOKEN` (your CDO API token).
-3. Optional: set `NOAA_START_DATE` and `NOAA_END_DATE` env vars in the workflow (or leave defaults).
-4. Run workflow manually (Actions tab) or wait for the schedule. It will write:
-   - `seattle_rain_monthly.csv`
-   - `seattle_rain_annual.csv`
-5. **Enable GitHub Pages**: Settings → Pages → Source: `main` and `/root`.
-6. View: `https://<username>.github.io/<repo>/seattle_rain_dashboard.html`
+- **Annual totals:** how each year's rainfall compares over time.
+- **Monthly breakdown:** rainfall by month for any year you pick.
+- **Intensity heatmap:** every month of every year on one grid, so wet and dry stretches stand out.
 
-## Notes
-- Data source: NOAA/NCEI CDO API v2 (`/data` endpoint; datasets **GSOM** and **GSOY**, datatype `PRCP`, station `GHCND:USW00024233`).
-- Units are **inches** (`units=standard`).
-- CDO rate limits are generous (5 req/sec, 10,000/day). The workflow stays well under limits.
+All values are precipitation totals in inches.
 
-## References
-- NOAA CDO API v2 docs and token request.
-- Sea-Tac station detail (GHCND:USW00024233).
+## How it works
 
-## Embed (Wix example)
-```html
-<iframe src="https://xanderf98.github.io/seattle-weather/seattle_rain_dashboard.html" width="100%" height="1200" frameborder="0"></iframe>
 ```
+NOAA Climate Data Online API  -->  scripts/fetch_noaa_precip.py  -->  two CSV files  -->  seattle_rain_dashboard.html
+```
+
+1. A GitHub Actions workflow runs every Monday and calls `scripts/fetch_noaa_precip.py`.
+2. The script pulls monthly and annual precipitation totals for the Sea-Tac station from NOAA and writes `seattle_rain_monthly.csv` and `seattle_rain_annual.csv`.
+3. The workflow commits the refreshed CSVs to this repository.
+4. The dashboard is a single static HTML page, served by GitHub Pages, that loads the two CSVs and draws the charts with Plotly.
+
+There is no server and no database. The repository is the data store, and the schedule keeps it current.
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `seattle_rain_dashboard.html` | The dashboard page |
+| `scripts/fetch_noaa_precip.py` | Fetches the data from NOAA |
+| `.github/workflows/noaa_rain_update.yml` | Weekly refresh schedule |
+| `seattle_rain_monthly.csv`, `seattle_rain_annual.csv` | The data the dashboard reads |
+
+## Data source
+
+NOAA National Centers for Environmental Information, Climate Data Online API v2.
+
+- Station: Seattle-Tacoma International Airport (`GHCND:USW00024233`)
+- Datasets: Global Summary of the Month (GSOM) and Global Summary of the Year (GSOY)
+- Data type: `PRCP`, in inches
+
+NOAA limits monthly and annual requests to ten years at a time, so the script fetches the full range in windows and joins them.
+
+## Run it yourself
+
+1. Request a free API token from NOAA Climate Data Online.
+2. Install the dependencies and run the script:
+
+   ```
+   pip install requests pandas
+   NOAA_CDO_TOKEN=your_token python scripts/fetch_noaa_precip.py
+   ```
+
+3. Open `seattle_rain_dashboard.html` through a local web server, for example `python -m http.server`, since browsers block CSV loading from a plain file.
+
+To run the scheduled refresh in your own copy, add the token as a repository secret named `NOAA_CDO_TOKEN`.
